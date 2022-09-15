@@ -1,0 +1,141 @@
+import pandas as pd
+import numpy as np
+
+import matplotlib as plt
+from PyResis import propulsion_power
+ship = propulsion_power.Ship()
+
+'''CR = pd.read_csv('D:\PythonProjects\pythonProject\CR.csv')
+yacht = pd.read_csv('D:\PythonProjects\Data\Yachta data.csv', sep=';', names=(
+    'LCB',
+    'cp',
+    'L_D',
+    'B_T',
+    'L_B',
+    'Fn',
+    'Cr'))
+'''
+#TYPE DATA
+
+L =     20
+B =     5
+LCB =   0
+T =     1
+CP =    0.78
+CM =    0.9
+CWP =   0.9
+CB =    0.7
+V =     70
+D =     L*B*T*CB
+S = 1.025 * (1.7 * L * T + D /T)
+#speed
+vmin =  1.1
+vmax =  8
+step = 0.01
+v = np.arange(start=vmin, stop=vmax, step=step, dtype=None)
+CSTERN = 0
+#water
+t = 15
+tt = t - 12
+ny = 1e-06 * (1.2350 + ((0.585*(1e-03))*tt-0.03361)* tt)
+phi = (-0.0053) * t**2 + 0.0084 * t + 1000.2
+##########
+
+RT = []
+PP = []
+for i in v:
+    ship.dimension(
+                length = L,
+                draught = T,
+                beam = B,
+                speed = i,
+                slenderness_coefficient = L/(D**(1/3)),
+                prismatic_coefficient = CP,
+                ny = ny,
+                phi=phi,
+                CP = CP,
+                CB = CB,
+                LCB = LCB,
+                V = V,
+                CSTERN = CSTERN
+               )
+    RT.append(ship.total_resistance()) #N
+    PP.append(ship.prop_power(propulsion_eff= 1.0)) #W
+'''
+print(f'sample resistance RT = {RT/1000} kN')
+print(f'sample propultion power PP = {PP/1000} kW')
+
+
+R = RT/1000
+'''
+
+
+PE = np.array(PP)/1000 #kW
+
+Fn = v/(np.sqrt(9.81*L))
+EHP = np.array(RT)*v
+DHP = EHP / 0.6
+BHP = DHP/0.98
+NCR = BHP*(1+(15/100))
+MCR = NCR/0.85
+MCR = MCR/1000 #kW
+
+HyRES =pd.DataFrame({'V _ms':v,'Fn': Fn,'RT _N': RT,'EHP _W': EHP,'DHP_W': DHP,'BHP_W': BHP,'NCR_W': NCR,'MCR_kW': MCR})
+
+
+
+
+print('END')
+
+
+'''
+### Plot 3
+# Resistance N / speed
+import matplotlib.pyplot as plt
+
+fig3, (ax1, ax2) = plt.subplots(nrows=2, figsize=(11.69,8.27), dpi=100)
+title = f'Single Hull L = {L}, B ={B}, T = {T}, LCB ={LCB}, cp = {CP}, DWT = {D}, phi = {phi}'
+
+fig3.suptitle(title, fontsize=14,)
+ax1.plot(v, RT, color='r')
+ax1.set_xlabel('Speed (m/s)')
+ax1.set_ylabel('RT N')
+
+major_ticks1 = np.arange(vmin, vmax,0.5)
+minor_ticks1 = np.arange(vmin, vmax,0.1)
+major_yticks1 = np.arange(0, (max(RT)), 500)
+minor_yticks1 = np.arange(0, (max(RT)), 100)
+
+ax1.set_xticks(major_ticks1)
+ax1.set_xticks(minor_ticks1, minor=True)
+ax1.set_yticks(major_yticks1)
+ax1.set_yticks(minor_yticks1, minor=True)
+
+ax1.grid(which='minor', alpha=0.2)
+ax1.grid(which='major', alpha=0.5)
+
+############### sub plot 2 ########### power
+
+ax2.plot(v, PE, color='blue')
+ax2.set_xlabel('Speed (m/s)')
+ax2.set_ylabel('PE kW')
+
+major_ticks2 = np.arange(vmin, vmax,0.5)
+minor_ticks2 = np.arange(vmin, vmax,0.1)
+major_yticks2 = np.arange(0, (max(PE)), 2)
+minor_yticks2 = np.arange(0, (max(PE)), 0.2)
+
+ax2.set_xticks(major_ticks2)
+ax2.set_xticks(minor_ticks2, minor=True)
+ax2.set_yticks(major_yticks2)
+ax2.set_yticks(minor_yticks2, minor=True)
+
+ax2.grid(which='minor', alpha=0.2)
+ax2.grid(which='major', alpha=0.5)
+
+plt.show()
+
+'''
+
+
+
