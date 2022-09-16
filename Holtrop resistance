@@ -2,7 +2,20 @@ import os
 import math
 import numpy as np
 from scipy import interpolate
-
+"""
+Corrected by Mikolaj Marczak, formulas according book:  Computational Ship Design author: Myung-Il Roh Kyu-Yeul Lee (Chapter 5 Prediction of Resistance and Power)
+which follow the Holtrop estimation of resistance 
+formulas are prepared for ship without bulbous-bow and for sweet water. 
+Updates:
+* Wave Resistance
+* Friction Resistance 
+* Reynolds number
+* Resistance of Attachments (the code is in this part customized for my project)
+* I + k
+* Model correction
+* Total resistance
+* commend to preview particulars of total resistance   
+"""
 fn = os.path.join(os.path.dirname(__file__), 'cr.txt')
 cr_list = np.loadtxt(fn)
 cr_points = cr_list.T[:3].T
@@ -10,7 +23,7 @@ cr_values = cr_list.T[3].T / 1000
 cr = interpolate.LinearNDInterpolator(cr_points, cr_values)
 cr_nearest = interpolate.NearestNDInterpolator(cr_points, cr_values)
 
-def frictional_resistance_coef(length, speed, **kwargs):
+def frictional_resistance_coef(LWL, speed, **kwargs):
     """
     Flat plate frictional resistance of the ship according to ITTC formula.
     ref: https://ittc.info/media/2021/75-02-02-02.pdf
@@ -20,11 +33,11 @@ def frictional_resistance_coef(length, speed, **kwargs):
     :param kwargs: optional could take in temperature to take account change of water property
     :return: Frictional resistance coefficient of the vehicle
     """
-    Cf = 0.075 / (np.log10(reynolds_number(length, speed, **kwargs)) - 2) ** 2
+    Cf = 0.075 / (np.log10(reynolds_number(LWL, speed, **kwargs)) - 2) ** 2
     return Cf
 
 
-def reynolds_number(length, speed, temperature=15):
+def reynolds_number(LWL, speed, temperature=15):
     """
     Reynold number utility function that return Reynold number for vehicle at specific length and speed.
     Optionally, it can also take account of temperature effect of sea water.
@@ -36,10 +49,14 @@ def reynolds_number(length, speed, temperature=15):
     :param temperature: degree C 
     :return: Reynolds number of the vehicle (dimensionless)
     """
-    kinematic_viscosity = interpolate.interp1d([0, 10, 20, 25, 30, 40],
-                                               np.array([18.54, 13.60, 10.50, 9.37, 8.42, 6.95]) / 10 ** 7)
-    # Data from http://web.mit.edu/seawater/2017_MIT_Seawater_Property_Tables_r2.pdf
-    Re = length * speed / kinematic_viscosity(temperature)
+
+    tt = temperature - 12
+    kinematic_viscosity = 1e-06 * (1.2350 + ((0.585*(1e-03))*tt-0.03361)* tt)  # formula from ITTC for sweet water (i need it so i put it here)
+    """
+    For salt water viscosity = 1.18831 - 1e-06
+    """
+    Re = speed * LWL / kinematic_viscosity
+
     return Re
 
 
@@ -74,11 +91,13 @@ def residual_resistance_coef(slenderness, prismatic_coef, froude_number):
     return Cr
 
 
-def friction_resistance(length, phi, speed, surface_area, frictional_resistance_coef):
+def friction_resistance(length, phi, speed, S, frictional_resistance_coef):
     """
     Return friction resistance
     """
-    Rf = 0.5 * phi * speed**2 * surface_area * frictional_resistance_coef
+
+    Rf =(1/2)*frictional_resistance_coef*phi*S*(speed**2)
+
     return Rf
 
 def I_K(L,B,T, CP, CB,V,LCB=0, CSTERN=0):
@@ -91,11 +110,84 @@ def I_K(L,B,T, CP, CB,V,LCB=0, CSTERN=0):
 def RAPP (L,speed, phi,):
     """
     Resistance Attachments (RAPP)
+
     :return: Resistance Attachments (RAPP) N
     """
-    Raap = 0.5*phi*speed**2*1.8*frictional_resistance_coef(L, speed)
+
+
+    Raap = 0.5*phi*(speed**2)*1.8*18*frictional_resistance_coef(L, speed)  # zapytaj o 18
 
     return Raap
+
+def wave_resistance(LWL,B,T,V,CP,CB,LCB,CWP, Fn, phi):
+    B_LWL = B/LWL
+    LR = LWL * ((1 - CP + (0.06 * CP * LCB)) / (4 * CP - 1))
+
+    if B_LWL <= 0.11:
+        c7 = 0.229577*(B/LWL)**(1/3)
+    elif 0.11< B_LWL and B_LWL <= 0.25:
+        c7 = B_LWL
+    else:
+        c7 = 0.5-0.0625*(LWL/B)
+
+    a = -((LWL/B)**0.80856)*((1-CWP)**0.30484)*((1-CP-0.0225*LCB)**0.6367)*((LR/B)**0.34574)*(((100*V)/(LWL**3))**0.16302)
+    ie = 1+89*np.exp(a)
+    c1 = (2223105*c7**3.78613)*((T/B)**1.07961)*((90-ie)**-1.37565)
+
+    if CP <= 0.8:
+        c16 =8.07981*CP-13.8673*CP**2+6.984388*CP**3
+    else:
+        c16 =1.73014-0.7067*CP
+
+    m1 =0.0140407*(LWL/T)-1.75254*(V**(1/3)/LWL)-4.79323*(B/LWL)-c16
+    LWL3_V = (LWL**3)/V
+
+    if LWL3_V <= 512:
+        c15 = -1.69385
+    elif 512 < LWL3_V and LWL3_V <= 1726.91:
+        c15 = -1.69385 + (((LWL)/(V**(1/3)))-8)/2.36
+    else:
+        c15 = 0
+    LWL_B = LWL/B
+
+    if LWL_B <= 12:
+        lamb = 1.446*CP - 0.03*LWL_B
+    else:
+        1.446*CP - 0.36
+
+    c17 =6919.3*(CB/CP)**(-1.3346)*(V/LWL**3)**2.00977*(LWL/B-2)**1.40692
+    m3 = -7.2035*(B_LWL)**0.326869*(T/B)**0.605375
+    m4 = 0.4*c15*np.exp(-0.034*Fn**(-3.29))
+
+    Rwa04 = c1 * phi * 9.81 * V * np.exp(m1 * 0.4 ** (-0.9) + m4 * np.cos(lamb * 0.4 ** -2))
+    Rwb05 = c17 * phi * 9.81 * V * np.exp(m3 * 0.55 ** (-0.9) + m4 * np.cos(lamb * 0.55 ** (-2)))
+
+
+    if Fn < 0.4:
+        Rw = c1 * phi * 9.81 * V * np.exp(m1 * Fn ** (-0.9) + m4 * np.cos(lamb * Fn ** (-2)))
+
+    elif 0.4>Fn and Fn <= 0.55 :
+        Rw = Rwa04 + ((20 * Fn - 8) / 3) * (Rwb05-Rwa04);
+
+    else:
+        Rw = c17 * phi * 9.81 * V * np.exp(m3 * Fn ** (-0.9) + m4 * np.cos(lamb * Fn ** (-2)))
+
+    return Rw
+
+def model_correction (speed, T, LWL, CB, phi, S):
+
+    T_LWL = T/LWL
+    if T_LWL < 0.04:
+        c4 = T_LWL
+    else:
+        c4= 0.04
+
+    cA = 0.006*(LWL+100)**(-0.16)-0.00205+0.003*np.sqrt(LWL/7.5)*(CB**4)*1*(0.04-c4) # c2 = 0?
+
+    RA = 0.5 * phi * cA * S * speed**2
+    return RA
+
+
 
 class Ship():
     """
@@ -104,8 +196,8 @@ class Ship():
     def __init__(self):
         pass
 
-    def dimension(self, length, draught, beam, speed,
-                 slenderness_coefficient, prismatic_coefficient, ny, phi, CP, CB, LCB, V, CSTERN):
+    def dimension(self, length,LWL, draught, beam, speed,
+                 slenderness_coefficient, prismatic_coefficient, ny, phi, S, CP, CB,CWP,LCB, V, CSTERN, Fn):
         """
         Assign values for the main dimension of a ship.
 
@@ -119,6 +211,7 @@ class Ship():
             ∇ is displacement Am is midsection area of the ship
         """
         self.length = length
+        self.LWL = LWL
         self.draught = draught
         self.beam = beam
         self.speed = speed
@@ -131,13 +224,16 @@ class Ship():
                                      self.displacement / self.draught)
         self.CP = CP
         self.CB = CB
+        self.S = S
         self.LCB = LCB
         self.V = V
         self.CSTERN = CSTERN
+        self.CWP = CWP
+        self.Fn = Fn
 
     def total_resistance(self):
         """
-        Return resistance of the vehicle.
+        Return resistance of the vessel.
 
         :return: newton the resistance of the ship
         """
@@ -147,10 +243,41 @@ class Ship():
                                                          froude_number(self.speed, self.length))
        
         RT = 1 / 2 * self.total_resistance_coef * self.phi * self.surface_area * self.speed ** 2'''
-        RT = friction_resistance(self.length, self.phi, self.speed, self.surface_area, frictional_resistance_coef(self.length, self.speed))*I_K(self.length,self.beam,self.draught, self.CP, self.CB,self.V,self.LCB, self.CSTERN) \
-             + RAPP (self.length,self.speed,self.phi)
+        RT = friction_resistance(self.length, self.phi, self.speed, self.S, frictional_resistance_coef(self.LWL, self.speed))\
+             *I_K(self.length,self.beam,self.draught, self.CP, self.CB,self.V,self.LCB, self.CSTERN) \
+             + RAPP (self.length,self.speed,self.phi) \
+             + wave_resistance(self.LWL,self.beam,self.draught,self.V,self.CP,self.CB,self.LCB,self.CWP, self.Fn, self.phi) \
+             + model_correction (self.speed, self.draught, self.LWL, self.CB, self.phi, self.S)
+
+
 
         return RT
+
+    def show_resistance(self):
+        """
+        Printing of this functions sample:
+
+        print(ship.show_resistance())
+
+        shows the value of particular resistance
+        :return: library of resistance values and the total resistance value
+        """
+
+        show = {'Speed':self.speed,
+                'RF':friction_resistance(self.length, self.phi, self.speed, self.surface_area, frictional_resistance_coef(self.length, self.speed)),
+                'Rn': reynolds_number(self.LWL, self.speed, temperature=15) ,
+                'Cf':frictional_resistance_coef(self.length, self.speed) ,
+                'I_k':I_K(self.length,self.beam,self.draught, self.CP, self.CB,self.V,self.LCB, self.CSTERN),
+                'RAAP':RAPP (self.length,self.speed,self.phi),
+                'RW':wave_resistance(self.LWL,self.beam,self.draught,self.V,self.CP,self.CB,self.LCB,self.CWP, self.Fn, self.phi),
+                'RA':model_correction (self.speed, self.draught, self.LWL, self.CB, self.phi, self.S),
+                'RT': friction_resistance(self.length, self.phi, self.speed, self.surface_area, frictional_resistance_coef(self.length, self.speed))\
+             *I_K(self.length,self.beam,self.draught, self.CP, self.CB,self.V,self.LCB, self.CSTERN) \
+             + RAPP (self.length,self.speed,self.phi) \
+             + wave_resistance(self.LWL,self.beam,self.draught,self.V,self.CP,self.CB,self.LCB,self.CWP, self.Fn, self.phi) \
+             + model_correction (self.speed, self.draught, self.LWL, self.CB, self.phi, self.S)
+                }
+        return show
 
     def maximum_deck_area(self, water_plane_coef=0.88):
         """
